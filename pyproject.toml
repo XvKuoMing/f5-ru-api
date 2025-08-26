@@ -1,0 +1,32 @@
+[project]
+name = "t5-tts"
+version = "0.1.0"
+description = "t5 tts model inference engine"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "torch",
+  "torchvision",
+  "torchaudio",
+  "ruaccent",
+  "f5-tts",
+  "huggingface_hub",
+  "gradio",
+  "pillow",
+  "fastapi",
+  "uvicorn",
+  "soundfile",
+  "numpy",
+  "pydantic-settings"
+]
+
+
+[tool.uv.sources]
+torch = { index = "pytorch" }
+torchaudio = { index = "pytorch" }
+torchvision = { index = "pytorch" }
+
+[[tool.uv.index]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
