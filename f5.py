@@ -8,12 +8,15 @@ from huggingface_hub import hf_hub_download
 from ruaccent import RUAccent
 from f5_tts.infer.utils_infer import (
     infer_process,
+    infer_batch_process,
     load_model,
     load_vocoder,
     preprocess_ref_audio_text,
+    chunk_text,
 )
 from f5_tts.model import DiT
-from typing import Optional, Any, Literal
+from typing import Optional, Any, Literal, Iterator, Tuple
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 import logging
 
@@ -197,6 +200,62 @@ class F5Engine:
 
         duration = (float(num_samples) / float(final_sample_rate)) if num_samples is not None else 0.0
         return self.convert_to_pcm16(final_wave, final_sample_rate, response_format), final_sample_rate, duration
+
+    def generate_stream(
+        self,
+        voice: str,
+        gen_text: str,
+        response_format: Literal["pcm16"] = "pcm16",
+        gen_config: Optional[F5GenerationSettings] = None,
+        chunk_size: int = 2048,
+    ) -> Tuple[Iterator[bytes], int]:
+        """
+        Stream audio as PCM16 chunks.
+
+        Returns (generator, sample_rate).
+        """
+        if response_format != "pcm16":
+            raise ValueError("Streaming currently supports only 'pcm16'.")
+
+        gen_config = gen_config or self.gen_config
+        voice_obj = self.voice_manager.get_voice(voice)
+        ref_audio_path = voice_obj.ref_audio
+        ref_text = voice_obj.ref_text
+        gen_text_accented = self.voice_manager.maybe_accentize(gen_text)
+
+        # Prepare batching similarly to infer_process
+        audio_tensor, sr = torchaudio.load(ref_audio_path)
+        if audio_tensor.shape[0] > 1:
+            audio_tensor = torch.mean(audio_tensor, dim=0, keepdim=True)
+        # Estimate max chars per chunk using the same heuristic
+        max_chars = int(len(ref_text.encode("utf-8")) / (audio_tensor.shape[-1] / sr) * (22 - audio_tensor.shape[-1] / sr) * gen_config.speed)
+        gen_text_batches = chunk_text(gen_text_accented.strip(), max_chars=max_chars)
+
+        def pcm_generator() -> Iterator[bytes]:
+            # Run heavy generation in a separate thread so concurrent requests don't block each other
+            def _iter():
+                for chunk, sample_rate in infer_batch_process(
+                    (audio_tensor, sr),
+                    ref_text,
+                    gen_text_batches,
+                    self.model,
+                    self.vocoder,
+                    progress=None,
+                    cross_fade_duration=gen_config.cross_fade_duration,
+                    nfe_step=gen_config.nfe_step,
+                    speed=gen_config.speed,
+                    device=str(self.device),
+                    streaming=True,
+                    chunk_size=chunk_size,
+                ):
+                    yield self.convert_to_pcm16(chunk, sample_rate, format="pcm16")
+            with ThreadPoolExecutor(max_workers=1) as ex:
+                for b in ex.map(lambda x: x, _iter()):
+                    yield b
+
+        # The infer path always resamples to 24000 inside utils, but we return the yielded rate
+        # from the generator via header at the API level using the known target rate 24000.
+        return pcm_generator(), 24000
         
         
         

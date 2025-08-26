@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Depends, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
+from starlette.concurrency import run_in_threadpool, iterate_in_threadpool
 from fastapi import Query
 from typing import Literal
 from f5 import (
@@ -72,15 +73,51 @@ async def generate_audio_speech(request: AudioSpeechRequest, f5_engine: F5Engine
 		raise HTTPException(status_code=400, detail=f"Model {request.model} not found")
 	if request.voice not in f5_engine.voices:
 		raise HTTPException(status_code=400, detail=f"Voice {request.voice} not found")
-	if request.format not in ["pcm16", "wav"]:
-		raise HTTPException(status_code=400, detail=f"Format {request.format} not supported")
-	audio_bytes, sample_rate, duration = f5_engine.generate(voice=request.voice, gen_text=request.input, response_format=request.format)
-	media_type = "audio/wav" if request.format == "wav" else "audio/pcm"
+	if request.response_format not in ["pcm16", "wav"]:
+		raise HTTPException(status_code=400, detail=f"Format {request.response_format} not supported")
+	# Stream if requested (only supports pcm16)
+	if getattr(request, "stream", False):
+		if request.response_format != "pcm16":
+			raise HTTPException(status_code=400, detail="Streaming only supports pcm16 format")
+		gen, sample_rate = f5_engine.generate_stream(voice=request.voice, gen_text=request.input, response_format=request.response_format)
+		return StreamingResponse(iterate_in_threadpool(gen), media_type="audio/pcm", headers={
+			"x-audio-sample-rate": str(sample_rate),
+		})
+	# Non-streaming: offload to threadpool to avoid blocking
+	audio_bytes, sample_rate, duration = await run_in_threadpool(
+		f5_engine.generate,
+		voice=request.voice,
+		gen_text=request.input,
+		response_format=request.response_format,
+	)
+	media_type = "audio/wav" if request.response_format == "wav" else "audio/pcm"
 	headers = {
 		"x-audio-sample-rate": str(sample_rate),
 		"x-audio-duration-seconds": f"{duration:.6f}",
 	}
 	return Response(content=audio_bytes, media_type=media_type, headers=headers)
+
+@app.post(
+	"/v1/audio/speech/stream",
+	responses={
+		200: {
+			"content": {
+				"audio/pcm": {},
+			}
+		}
+	}
+)
+async def generate_audio_speech_stream(request: AudioSpeechRequest, f5_engine: F5Engine = Depends(lambda: app.state.f5_engine)):
+	if request.model != f5_engine.model_name:
+		raise HTTPException(status_code=400, detail=f"Model {request.model} not found")
+	if request.voice not in f5_engine.voices:
+		raise HTTPException(status_code=400, detail=f"Voice {request.voice} not found")
+	if request.response_format != "pcm16":
+		raise HTTPException(status_code=400, detail=f"Streaming only supports pcm16 format")
+	gen, sample_rate = f5_engine.generate_stream(voice=request.voice, gen_text=request.input, response_format=request.response_format)
+	return StreamingResponse(iterate_in_threadpool(gen), media_type="audio/pcm", headers={
+		"x-audio-sample-rate": str(sample_rate),
+	})
 
 @app.get(
 	"/v1/audio/speech",
@@ -97,17 +134,22 @@ async def generate_audio_speech_get(
 	input: str = Query(..., description="Input text"),
 	voice: str = Query(..., description="Voice name"),
 	model: str = Query(..., description="Model name"),
-	format: Literal["pcm16", "wav"] = Query("wav", description="Format"),
+	response_format: Literal["pcm16", "wav"] = Query("wav", description="Response format"),
 	f5_engine: F5Engine = Depends(lambda: app.state.f5_engine),
 ):
 	if model != f5_engine.model_name:
 		raise HTTPException(status_code=400, detail=f"Model {model} not found")
 	if voice not in f5_engine.voices:
 		raise HTTPException(status_code=400, detail=f"Voice {voice} not found")
-	if format not in ["pcm16", "wav"]:
-		raise HTTPException(status_code=400, detail=f"Format {format} not supported")
-	audio_bytes, sample_rate, duration = f5_engine.generate(voice=voice, gen_text=input, response_format=format)
-	media_type = "audio/wav" if format == "wav" else "audio/pcm"
+	if response_format not in ["pcm16", "wav"]:
+		raise HTTPException(status_code=400, detail=f"Format {response_format} not supported")
+	audio_bytes, sample_rate, duration = await run_in_threadpool(
+		f5_engine.generate,
+		voice=voice,
+		gen_text=input,
+		response_format=response_format,
+	)
+	media_type = "audio/wav" if response_format == "wav" else "audio/pcm"
 	headers = {
 		"x-audio-sample-rate": str(sample_rate),
 		"x-audio-duration-seconds": f"{duration:.6f}",
