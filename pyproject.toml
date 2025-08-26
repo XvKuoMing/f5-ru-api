@@ -5,19 +5,18 @@ description = "t5 tts model inference engine"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-  "torch",
-  "torchvision",
-  "torchaudio",
-  "ruaccent",
-  "f5-tts",
-  "huggingface_hub",
-  "gradio",
-  "pillow",
-  "fastapi",
-  "uvicorn",
-  "soundfile",
-  "numpy",
-  "pydantic-settings",
+  "torch==2.8.0",
+  "torchvision==0.23.0",
+  "torchaudio==2.8.0",
+  "ruaccent==1.5.8.3",
+  "f5-tts==1.1.7",
+  "huggingface_hub==0.34.4",
+  "pillow==11.3.0",
+  "fastapi>=0.116.1",
+  "uvicorn>=0.35.0",
+  "soundfile==0.13.1",
+  "numpy==1.26.4",
+  "pydantic-settings>=2.10.1",
   "openai>=1.101.0",
 ]
 

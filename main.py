@@ -6,7 +6,8 @@ from typing import Literal
 from f5 import (
 	F5Engine, 
 	F5Settings, 
-	AccentSettings
+	AccentSettings,
+	F5EnginePool
 	)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
@@ -28,6 +29,7 @@ class EnvSettings(BaseSettings):
 	model_file: str = Field(default="espeech_tts_rlv2.pt", env="MODEL_FILE")
 	vocab_file: str = Field(default="vocab.txt", env="VOCAB_FILE")
 	voices_dir: str = Field(default="./voices", env="VOICES_DIR")
+	instances: int = Field(default=1, env="INSTANCES")
 
 
 settings = EnvSettings()
@@ -40,7 +42,12 @@ async def lifespan(app: FastAPI):
 		vocab_file=settings.vocab_file,
 	)
 	accent_settings = AccentSettings()
-	app.state.f5_engine = F5Engine(f5_settings, accent_settings, settings.voices_dir)
+	app.state.f5_engine = F5EnginePool(
+		f5_settings,
+		accent_settings,
+		settings.voices_dir,
+		num_instances=settings.instances,
+	)
 	yield
 	app.state.f5_engine = None
 
@@ -50,11 +57,11 @@ app = FastAPI(lifespan=lifespan)
 
 
 @app.get("/voices")
-async def get_voices(f5_engine: F5Engine = Depends(lambda: app.state.f5_engine)) -> Voices:
+async def get_voices(f5_engine: F5EnginePool = Depends(lambda: app.state.f5_engine)) -> Voices:
 	return Voices(voices=[Voice(name=voice) for voice in f5_engine.voices])
 
 @app.get("/models")
-async def get_model(f5_engine: F5Engine = Depends(lambda: app.state.f5_engine)) -> Models:
+async def get_model(f5_engine: F5EnginePool = Depends(lambda: app.state.f5_engine)) -> Models:
 	return Models(models=[Model(name=f5_engine.model_name)])
 
 @app.post(
@@ -68,7 +75,7 @@ async def get_model(f5_engine: F5Engine = Depends(lambda: app.state.f5_engine)) 
 		}
 	}
 )
-async def generate_audio_speech(request: AudioSpeechRequest, f5_engine: F5Engine = Depends(lambda: app.state.f5_engine)):
+async def generate_audio_speech(request: AudioSpeechRequest, f5_engine: F5EnginePool = Depends(lambda: app.state.f5_engine)):
 	if request.model != f5_engine.model_name:
 		raise HTTPException(status_code=400, detail=f"Model {request.model} not found")
 	if request.voice not in f5_engine.voices:
@@ -83,9 +90,8 @@ async def generate_audio_speech(request: AudioSpeechRequest, f5_engine: F5Engine
 		return StreamingResponse(iterate_in_threadpool(gen), media_type="audio/pcm", headers={
 			"x-audio-sample-rate": str(sample_rate),
 		})
-	# Non-streaming: offload to threadpool to avoid blocking
-	audio_bytes, sample_rate, duration = await run_in_threadpool(
-		f5_engine.generate,
+	# Non-streaming: use pool (async) to run generation
+	audio_bytes, sample_rate, duration = await f5_engine.generate(
 		voice=request.voice,
 		gen_text=request.input,
 		response_format=request.response_format,
@@ -107,14 +113,14 @@ async def generate_audio_speech(request: AudioSpeechRequest, f5_engine: F5Engine
 		}
 	}
 )
-async def generate_audio_speech_stream(request: AudioSpeechRequest, f5_engine: F5Engine = Depends(lambda: app.state.f5_engine)):
+async def generate_audio_speech_stream(request: AudioSpeechRequest, f5_engine: F5EnginePool = Depends(lambda: app.state.f5_engine)):
 	if request.model != f5_engine.model_name:
 		raise HTTPException(status_code=400, detail=f"Model {request.model} not found")
 	if request.voice not in f5_engine.voices:
 		raise HTTPException(status_code=400, detail=f"Voice {request.voice} not found")
 	if request.response_format != "pcm16":
 		raise HTTPException(status_code=400, detail=f"Streaming only supports pcm16 format")
-	gen, sample_rate = f5_engine.generate_stream(voice=request.voice, gen_text=request.input, response_format=request.response_format)
+	gen, sample_rate = await f5_engine.start_stream(voice=request.voice, gen_text=request.input, response_format=request.response_format)
 	return StreamingResponse(iterate_in_threadpool(gen), media_type="audio/pcm", headers={
 		"x-audio-sample-rate": str(sample_rate),
 	})
@@ -135,7 +141,7 @@ async def generate_audio_speech_get(
 	voice: str = Query(..., description="Voice name"),
 	model: str = Query(..., description="Model name"),
 	response_format: Literal["pcm16", "wav"] = Query("wav", description="Response format"),
-	f5_engine: F5Engine = Depends(lambda: app.state.f5_engine),
+	f5_engine: F5EnginePool = Depends(lambda: app.state.f5_engine),
 ):
 	if model != f5_engine.model_name:
 		raise HTTPException(status_code=400, detail=f"Model {model} not found")
@@ -143,8 +149,7 @@ async def generate_audio_speech_get(
 		raise HTTPException(status_code=400, detail=f"Voice {voice} not found")
 	if response_format not in ["pcm16", "wav"]:
 		raise HTTPException(status_code=400, detail=f"Format {response_format} not supported")
-	audio_bytes, sample_rate, duration = await run_in_threadpool(
-		f5_engine.generate,
+	audio_bytes, sample_rate, duration = await f5_engine.generate(
 		voice=voice,
 		gen_text=input,
 		response_format=response_format,

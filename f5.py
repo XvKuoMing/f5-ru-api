@@ -5,6 +5,8 @@ import soundfile as sf
 import torch
 import torchaudio
 from huggingface_hub import hf_hub_download
+import asyncio
+from contextlib import asynccontextmanager
 from ruaccent import RUAccent
 from f5_tts.infer.utils_infer import (
     infer_process,
@@ -232,26 +234,21 @@ class F5Engine:
         gen_text_batches = chunk_text(gen_text_accented.strip(), max_chars=max_chars)
 
         def pcm_generator() -> Iterator[bytes]:
-            # Run heavy generation in a separate thread so concurrent requests don't block each other
-            def _iter():
-                for chunk, sample_rate in infer_batch_process(
-                    (audio_tensor, sr),
-                    ref_text,
-                    gen_text_batches,
-                    self.model,
-                    self.vocoder,
-                    progress=None,
-                    cross_fade_duration=gen_config.cross_fade_duration,
-                    nfe_step=gen_config.nfe_step,
-                    speed=gen_config.speed,
-                    device=str(self.device),
-                    streaming=True,
-                    chunk_size=chunk_size,
-                ):
-                    yield self.convert_to_pcm16(chunk, sample_rate, format="pcm16")
-            with ThreadPoolExecutor(max_workers=1) as ex:
-                for b in ex.map(lambda x: x, _iter()):
-                    yield b
+            for chunk, sample_rate in infer_batch_process(
+                (audio_tensor, sr),
+                ref_text,
+                gen_text_batches,
+                self.model,
+                self.vocoder,
+                progress=None,
+                cross_fade_duration=gen_config.cross_fade_duration,
+                nfe_step=gen_config.nfe_step,
+                speed=gen_config.speed,
+                device=str(self.device),
+                streaming=True,
+                chunk_size=chunk_size,
+            ):
+                yield self.convert_to_pcm16(chunk, sample_rate, format="pcm16")
 
         # The infer path always resamples to 24000 inside utils, but we return the yielded rate
         # from the generator via header at the API level using the known target rate 24000.
@@ -263,3 +260,87 @@ class F5Engine:
         
         
         
+
+class F5EnginePool:
+
+    def __init__(self, settings: F5Settings, accent_settings: AccentSettings, voices_dir: str, num_instances: int = 1):
+        if num_instances < 1:
+            raise ValueError("num_instances must be >= 1")
+        self._instances: list[F5Engine] = [F5Engine(settings, accent_settings, voices_dir) for _ in range(num_instances)]
+        self._available: asyncio.Queue[int] = asyncio.Queue()
+        for i in range(len(self._instances)):
+            self._available.put_nowait(i)
+
+    @property
+    def model_name(self) -> str:
+        return self._instances[0].model_name
+
+    @property
+    def voices(self) -> list[str]:
+        return self._instances[0].voices
+
+    async def _acquire_index(self) -> int:
+        idx = await self._available.get()
+        return idx
+
+    def _release_index(self, idx: int) -> None:
+        self._available.put_nowait(idx)
+
+    @asynccontextmanager
+    async def acquire(self):
+        idx = await self._acquire_index()
+        try:
+            yield self._instances[idx]
+        finally:
+            self._release_index(idx)
+
+    async def generate(
+        self,
+        *,
+        voice: str,
+        gen_text: str,
+        response_format: str = "pcm16",
+        gen_config: Optional[F5GenerationSettings] = None,
+    ) -> tuple[bytes, int, float]:
+        async with self.acquire() as engine:
+            return await asyncio.to_thread(
+                engine.generate,
+                voice,
+                gen_text,
+                response_format,
+                gen_config,
+            )
+
+    async def start_stream(
+        self,
+        *,
+        voice: str,
+        gen_text: str,
+        response_format: Literal["pcm16"] = "pcm16",
+        gen_config: Optional[F5GenerationSettings] = None,
+        chunk_size: int = 2048,
+    ) -> tuple[Iterator[bytes], int]:
+        idx = await self._acquire_index()
+        engine = self._instances[idx]
+        try:
+            base_gen, sample_rate = engine.generate_stream(
+                voice=voice,
+                gen_text=gen_text,
+                response_format=response_format,
+                gen_config=gen_config,
+                chunk_size=chunk_size,
+            )
+
+            def wrapped_gen() -> Iterator[bytes]:
+                try:
+                    for chunk in base_gen:
+                        yield chunk
+                finally:
+                    # Ensure engine slot is released when streaming ends
+                    self._release_index(idx)
+
+            return wrapped_gen(), sample_rate
+        except Exception:
+            # In case of early failure, release the slot
+            self._release_index(idx)
+            raise
