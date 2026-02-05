@@ -76,7 +76,7 @@ async def get_model(f5_engine: F5Dep) -> Models:
 	}
 )
 async def generate_audio_speech(request: AudioSpeechRequest, f5_engine: F5Dep) -> Response | StreamingResponse:
-	if request.model != f5_engine.model_name:
+	if request.model != f5_engine.model_name and request.model not in ["tts-1", "tts", "f5"]:
 		raise HTTPException(status_code=400, detail=f"Model {request.model} not found")
 	if request.voice not in f5_engine.voices:
 		raise HTTPException(status_code=400, detail=f"Voice {request.voice} not found")

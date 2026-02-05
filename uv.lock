@@ -1044,6 +1044,11 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/39/7b/bb06b061991107cd8783f300adff3e7b7f284e330fd82f507f2a1417b11d/huggingface_hub-0.34.4-py3-none-any.whl", hash = "sha256:9b365d781739c93ff90c359844221beef048403f1bc1f1c123c191257c3c890a", size = 561452 },
 ]
 
+[package.optional-dependencies]
+hf-xet = [
+    { name = "hf-xet" },
+]
+
 [[package]]
 name = "humanfriendly"
 version = "10.0"
@@ -2428,12 +2433,12 @@ wheels = [
 
 [[package]]
 name = "ru-t5-tts"
-version = "0.1.0"
+version = "0.1.1"
 source = { virtual = "." }
 dependencies = [
     { name = "f5-tts" },
     { name = "fastapi" },
-    { name = "huggingface-hub" },
+    { name = "huggingface-hub", extra = ["hf-xet"] },
     { name = "numpy" },
     { name = "openai" },
     { name = "pillow" },
@@ -2443,6 +2448,7 @@ dependencies = [
     { name = "torch" },
     { name = "torchaudio", version = "2.9.0", source = { registry = "https://download.pytorch.org/whl/cu129" }, marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
     { name = "torchaudio", version = "2.9.0+cu129", source = { registry = "https://download.pytorch.org/whl/cu129" }, marker = "platform_machine != 'aarch64' or sys_platform != 'linux'" },
+    { name = "torchcodec" },
     { name = "torchvision", version = "0.24.0", source = { registry = "https://download.pytorch.org/whl/cu129" }, marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
     { name = "torchvision", version = "0.24.0+cu129", source = { registry = "https://download.pytorch.org/whl/cu129" }, marker = "platform_machine != 'aarch64' or sys_platform != 'linux'" },
     { name = "uvicorn" },
@@ -2452,7 +2458,7 @@ dependencies = [
 requires-dist = [
     { name = "f5-tts", specifier = "==1.1.7" },
     { name = "fastapi", specifier = ">=0.116.1" },
-    { name = "huggingface-hub", specifier = "==0.34.4" },
+    { name = "huggingface-hub", extras = ["hf-xet"] },
     { name = "numpy", specifier = "==1.26.4" },
     { name = "openai", specifier = ">=1.101.0" },
     { name = "pillow", specifier = "==11.3.0" },
@@ -2461,6 +2467,7 @@ requires-dist = [
     { name = "soundfile", specifier = "==0.13.1" },
     { name = "torch", specifier = "==2.9.0", index = "https://download.pytorch.org/whl/cu129" },
     { name = "torchaudio", specifier = "==2.9.0", index = "https://download.pytorch.org/whl/cu129" },
+    { name = "torchcodec", index = "https://download.pytorch.org/whl/cu129" },
     { name = "torchvision", index = "https://download.pytorch.org/whl/cu129" },
     { name = "uvicorn", specifier = ">=0.35.0" },
 ]
@@ -3006,6 +3013,19 @@ wheels = [
     { url = "https://download.pytorch.org/whl/cu129/torchaudio-2.9.0%2Bcu129-cp313-cp313t-manylinux_2_28_x86_64.whl", hash = "sha256:3d157731afef301acc3dbb312865c60c5722e23bef99d9854b067814544808ad" },
     { url = "https://download.pytorch.org/whl/cu129/torchaudio-2.9.0%2Bcu129-cp314-cp314-manylinux_2_28_x86_64.whl", hash = "sha256:e29024dcfcc137ee2e3ea5621674cb0b939a5172bfc5b5bab6ad92ca2a552183" },
     { url = "https://download.pytorch.org/whl/cu129/torchaudio-2.9.0%2Bcu129-cp314-cp314t-manylinux_2_28_x86_64.whl", hash = "sha256:6d8f18dca1f9aa3e3e976e20f2bd8ee215945000b0e5e3069d06453abed1b569" },
+]
+
+[[package]]
+name = "torchcodec"
+version = "0.10.0+cu129"
+source = { registry = "https://download.pytorch.org/whl/cu129" }
+wheels = [
+    { url = "https://download.pytorch.org/whl/cu129/torchcodec-0.10.0%2Bcu129-cp312-cp312-manylinux_2_28_aarch64.whl" },
+    { url = "https://download.pytorch.org/whl/cu129/torchcodec-0.10.0%2Bcu129-cp312-cp312-manylinux_2_28_x86_64.whl" },
+    { url = "https://download.pytorch.org/whl/cu129/torchcodec-0.10.0%2Bcu129-cp313-cp313-manylinux_2_28_aarch64.whl" },
+    { url = "https://download.pytorch.org/whl/cu129/torchcodec-0.10.0%2Bcu129-cp313-cp313-manylinux_2_28_x86_64.whl" },
+    { url = "https://download.pytorch.org/whl/cu129/torchcodec-0.10.0%2Bcu129-cp314-cp314-manylinux_2_28_aarch64.whl" },
+    { url = "https://download.pytorch.org/whl/cu129/torchcodec-0.10.0%2Bcu129-cp314-cp314-manylinux_2_28_x86_64.whl" },
 ]
 
 [[package]]
