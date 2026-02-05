@@ -1,13 +1,13 @@
 [project]
-name = "t5-tts"
+name = "ru-t5-tts"
 version = "0.1.0"
-description = "t5 tts model inference engine"
+description = "t5 russian tts model inference engine"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-  "torch==2.8.0",
-  "torchvision==0.23.0",
-  "torchaudio==2.8.0",
+  "torch==2.9.0",
+  "torchvision",
+  "torchaudio==2.9.0",
   "ruaccent==1.5.8.3",
   "f5-tts==1.1.7",
   "huggingface_hub==0.34.4",
@@ -28,5 +28,5 @@ torchvision = { index = "pytorch" }
 
 [[tool.uv.index]]
 name = "pytorch"
-url = "https://download.pytorch.org/whl/cu128"
+url = "https://download.pytorch.org/whl/cu129"
 explicit = true

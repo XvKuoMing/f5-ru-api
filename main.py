@@ -1,10 +1,9 @@
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.responses import Response, StreamingResponse
-from starlette.concurrency import run_in_threadpool, iterate_in_threadpool
+from starlette.concurrency import iterate_in_threadpool
 from fastapi import Query
-from typing import Literal
+from typing import Literal, Annotated
 from f5 import (
-	F5Engine, 
 	F5Settings, 
 	AccentSettings,
 	F5EnginePool
@@ -22,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class EnvSettings(BaseSettings):
-	model_config = SettingsConfigDict(env_file=".env")
+	model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 	host: str = Field(default="0.0.0.0", env="HOST")
 	port: int = Field(default=8000, env="PORT")
 	model_repo: str = Field(default="ESpeech/ESpeech-TTS-1_RL-V2", env="MODEL_REPO")
@@ -53,19 +52,20 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
-
+F5Dep = Annotated[F5EnginePool, Depends(lambda: app.state.f5_engine)]
 
 
 @app.get("/voices")
-async def get_voices(f5_engine: F5EnginePool = Depends(lambda: app.state.f5_engine)) -> Voices:
+async def get_voices(f5_engine: F5Dep) -> Voices:
 	return Voices(voices=[Voice(name=voice) for voice in f5_engine.voices])
 
 @app.get("/models")
-async def get_model(f5_engine: F5EnginePool = Depends(lambda: app.state.f5_engine)) -> Models:
+async def get_model(f5_engine: F5Dep) -> Models:
 	return Models(models=[Model(name=f5_engine.model_name)])
 
 @app.post(
 	"/v1/audio/speech",
+	response_model=None,
 	responses={
 		200: {
 			"content": {
@@ -75,17 +75,17 @@ async def get_model(f5_engine: F5EnginePool = Depends(lambda: app.state.f5_engin
 		}
 	}
 )
-async def generate_audio_speech(request: AudioSpeechRequest, f5_engine: F5EnginePool = Depends(lambda: app.state.f5_engine)):
+async def generate_audio_speech(request: AudioSpeechRequest, f5_engine: F5Dep) -> Response | StreamingResponse:
 	if request.model != f5_engine.model_name:
 		raise HTTPException(status_code=400, detail=f"Model {request.model} not found")
 	if request.voice not in f5_engine.voices:
 		raise HTTPException(status_code=400, detail=f"Voice {request.voice} not found")
-	if request.response_format not in ["pcm16", "wav"]:
+	if request.response_format not in ["pcm", "wav"]:
 		raise HTTPException(status_code=400, detail=f"Format {request.response_format} not supported")
 	# Stream if requested (only supports pcm16)
 	if getattr(request, "stream", False):
-		if request.response_format != "pcm16":
-			raise HTTPException(status_code=400, detail="Streaming only supports pcm16 format")
+		if request.response_format != "pcm":
+			raise HTTPException(status_code=400, detail="Streaming only supports pcm format")
 		gen, sample_rate = f5_engine.generate_stream(voice=request.voice, gen_text=request.input, response_format=request.response_format)
 		return StreamingResponse(iterate_in_threadpool(gen), media_type="audio/pcm", headers={
 			"x-audio-sample-rate": str(sample_rate),
@@ -113,13 +113,13 @@ async def generate_audio_speech(request: AudioSpeechRequest, f5_engine: F5Engine
 		}
 	}
 )
-async def generate_audio_speech_stream(request: AudioSpeechRequest, f5_engine: F5EnginePool = Depends(lambda: app.state.f5_engine)):
-	if request.model != f5_engine.model_name:
+async def generate_audio_speech_stream(request: AudioSpeechRequest, f5_engine: F5Dep) -> StreamingResponse:
+	if request.model != f5_engine.model_name and request.model not in ["tts-1", "tts", "f5"]:
 		raise HTTPException(status_code=400, detail=f"Model {request.model} not found")
 	if request.voice not in f5_engine.voices:
 		raise HTTPException(status_code=400, detail=f"Voice {request.voice} not found")
-	if request.response_format != "pcm16":
-		raise HTTPException(status_code=400, detail=f"Streaming only supports pcm16 format")
+	if request.response_format != "pcm":
+		raise HTTPException(status_code=400, detail=f"Streaming only supports pcm format")
 	gen, sample_rate = await f5_engine.start_stream(voice=request.voice, gen_text=request.input, response_format=request.response_format)
 	return StreamingResponse(iterate_in_threadpool(gen), media_type="audio/pcm", headers={
 		"x-audio-sample-rate": str(sample_rate),
@@ -137,17 +137,17 @@ async def generate_audio_speech_stream(request: AudioSpeechRequest, f5_engine: F
 	}
 )
 async def generate_audio_speech_get(
+	f5_engine: F5Dep,
 	input: str = Query(..., description="Input text"),
 	voice: str = Query(..., description="Voice name"),
 	model: str = Query(..., description="Model name"),
-	response_format: Literal["pcm16", "wav"] = Query("wav", description="Response format"),
-	f5_engine: F5EnginePool = Depends(lambda: app.state.f5_engine),
-):
+	response_format: Literal["pcm", "wav"] = Query("wav", description="Response format")
+) -> Response:
 	if model != f5_engine.model_name:
 		raise HTTPException(status_code=400, detail=f"Model {model} not found")
 	if voice not in f5_engine.voices:
 		raise HTTPException(status_code=400, detail=f"Voice {voice} not found")
-	if response_format not in ["pcm16", "wav"]:
+	if response_format not in ["pcm", "wav"]:
 		raise HTTPException(status_code=400, detail=f"Format {response_format} not supported")
 	audio_bytes, sample_rate, duration = await f5_engine.generate(
 		voice=voice,
@@ -163,7 +163,7 @@ async def generate_audio_speech_get(
 
 if __name__ == "__main__":
 	import uvicorn
-	settings = EnvSettings()
+
 	uvicorn.run(app, host=settings.host, port=settings.port)
 
 

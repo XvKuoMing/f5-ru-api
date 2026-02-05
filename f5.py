@@ -18,7 +18,7 @@ from f5_tts.infer.utils_infer import (
 )
 from f5_tts.model import DiT
 from typing import Optional, Any, Literal, Iterator, Tuple
-from concurrent.futures import ThreadPoolExecutor
+# from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 import logging
 
@@ -100,7 +100,7 @@ class F5VoiceManager:
 class F5Engine:
 
     @staticmethod
-    def convert_to_pcm16(wave: torch.Tensor, sample_rate: int, format: Literal["pcm16", "wav"] = "pcm16") -> bytes:
+    def convert_to_pcm16(wave: torch.Tensor, sample_rate: int, format: Literal["pcm", "wav"] = "pcm") -> bytes:
         # Accept torch.Tensor or numpy.ndarray, normalize to float32 in [-1, 1]
         if isinstance(wave, torch.Tensor):
             wave_np = wave.detach().cpu().float().numpy()
@@ -121,7 +121,7 @@ class F5Engine:
         # Clip to [-1, 1]
         samples_by_channels = np.clip(samples_by_channels, -1.0, 1.0)
 
-        if format == "pcm16":
+        if format == "pcm":
             int16_samples = (samples_by_channels * 32767.0).astype(np.int16, copy=False)
             # Interleave channels for raw PCM
             return int16_samples.tobytes()
@@ -165,7 +165,7 @@ class F5Engine:
     def generate(self, 
         voice: str,
         gen_text: str, 
-        response_format: str = "pcm16",
+        response_format: str = "pcm",
         gen_config: Optional[F5GenerationSettings] = None,
     ) -> bytes:
         """
@@ -207,7 +207,7 @@ class F5Engine:
         self,
         voice: str,
         gen_text: str,
-        response_format: Literal["pcm16"] = "pcm16",
+        response_format: Literal["pcm"] = "pcm",
         gen_config: Optional[F5GenerationSettings] = None,
         chunk_size: int = 2048,
     ) -> Tuple[Iterator[bytes], int]:
@@ -216,8 +216,8 @@ class F5Engine:
 
         Returns (generator, sample_rate).
         """
-        if response_format != "pcm16":
-            raise ValueError("Streaming currently supports only 'pcm16'.")
+        if response_format != "pcm":
+            raise ValueError("Streaming currently supports only 'pcm'.")
 
         gen_config = gen_config or self.gen_config
         voice_obj = self.voice_manager.get_voice(voice)
@@ -248,7 +248,7 @@ class F5Engine:
                 streaming=True,
                 chunk_size=chunk_size,
             ):
-                yield self.convert_to_pcm16(chunk, sample_rate, format="pcm16")
+                yield self.convert_to_pcm16(chunk, sample_rate, format="pcm")
 
         # The infer path always resamples to 24000 inside utils, but we return the yielded rate
         # from the generator via header at the API level using the known target rate 24000.
@@ -299,7 +299,7 @@ class F5EnginePool:
         *,
         voice: str,
         gen_text: str,
-        response_format: str = "pcm16",
+        response_format: str = "pcm",
         gen_config: Optional[F5GenerationSettings] = None,
     ) -> tuple[bytes, int, float]:
         async with self.acquire() as engine:
@@ -316,7 +316,7 @@ class F5EnginePool:
         *,
         voice: str,
         gen_text: str,
-        response_format: Literal["pcm16"] = "pcm16",
+        response_format: Literal["pcm"] = "pcm",
         gen_config: Optional[F5GenerationSettings] = None,
         chunk_size: int = 2048,
     ) -> tuple[Iterator[bytes], int]:

@@ -5,7 +5,7 @@ class AudioSpeechRequest(BaseModel):
     input: str = Field(..., description="Input text")
     voice: str = Field(..., description="Voice name")
     model: str = Field(..., description="Model name")
-    response_format: Literal["pcm16", "wav"] = Field(..., description="Response format")
+    response_format: Literal["pcm", "wav"] = Field(..., description="Response format")
 
 class AudioSpeechResponse(BaseModel):
     audio: str = Field(..., description="Base64-encoded generated audio")

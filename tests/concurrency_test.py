@@ -159,10 +159,10 @@ async def run_load(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--host", default="http://localhost:8000", help="Server host, e.g. http://localhost:8000")
+    parser.add_argument("--host", default="http://localhost:8080", help="Server host, e.g. http://localhost:8080")
     parser.add_argument("--text", default="Привет, это тест", help="Text to synthesize")
-    parser.add_argument("--voice", default=None, help="Voice name (defaults to first)")
-    parser.add_argument("--model", default=None, help="Model name (defaults to server current)")
+    parser.add_argument("--voice", default="alloy", help="Voice name (defaults to first)")
+    parser.add_argument("--model", default="ESpeech/ESpeech-TTS-1_RL-V2", help="Model name (defaults to server current)")
     parser.add_argument("--response_format", default="wav", choices=["wav", "pcm16"], help="Response format (non-stream)")
     parser.add_argument("--concurrency", type=int, default=4)
     parser.add_argument("--total", type=int, default=8)
